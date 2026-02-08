@@ -1,0 +1,666 @@
+---
+title: "Toothfish Analysis Report"
+author:
+  - name: "Roberto Licandeo"
+    email: "robertolicandeo@gmail.com"
+  - name: "Jim Ianelli"
+    email: "jim.ianelli@gmail.com"
+date: "Nov 12, 2025"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    fig_caption: true
+---
+
+```{css, echo=FALSE}
+body {
+  font-family: Arial, sans-serif;
+}
+h1, h2, h3 {
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 0.5em;
+}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### General Data Description for Toothfish Stock Assessment Model
+
+The Toothfish stock assessment model is configured using **Stock Synthesis (SS3)** with a time frame set from **1977** (`#_StartYr`) to **2023** (`#_EndYr`), and an accumulator age (`#_Nages`) of **40**. The core empirical data is derived from three total fleets, encompassing three commercial fisheries (**longline (pal), trotline (tro), and artisanal (art)**) that contribute annual catch biomass data.
+The Catch biomass is treated as an observation with error, with the Coefficient of Variation ($\text{CV}$) for the annual catch fixed at $0.05$. Abundance is indexed by CPUE for all three gear types, with time series as follows: `CPUE_pal` from **1992–2006**, **`CPUE_tro`** from **2007–2023**, and **`CPUE_art`** from **1986–2023**. To inform stock structure, **length composition data** is also utilized, collected across 41 bins from 20 to 240 units. 
+The time series for this composition data is **1997–2006** for the Longline fishery (`Fsh_pal`), **2007–2023** for the Trotline fishery (`Fsh_tro`), and **2003–2023** for the Artisanal fishery (`Fsh_art`). The **Coefficient of Variation (**$\text{CV}$) for these indices, which is used to calculate the log-scale standard error ($\text{SE}$), is provided for each data point and is often around $0.2$. The **Effective Sample Size (**$N_{\text{samp}}$) for all length compositions is fixed at 25 throughout the time series.
+
+### Model Parameterization (Control File Description)
+
+The Toothfish stock assessment model is parameterized using the **SS control file**, which defines the biological and management settings. Key biological parameters are estimated for a single growth pattern, including **Natural Mortality (M)**, which is fixed as a single parameter (initial estimate `0.15 yr-1`). **Growth** is modeled using the **von Bertalanffy** function, where the growth coefficient $K$ (initial 0.086 cm/yr) is fixed in this configuration. The asymptotic length $L_{\text{max}}$ (initial `152.2 cm`) is estimated, noting that $L_{\text{max}}$ may be fixed in alternative models. The **Coefficient of Variation (**$\text{CV}$) for growth is fixed at $0.1$. The two-parameter age-logistic function for **Maturity at age** specifies $50\%$ maturity at age **10** with a slope of **-0.9654**. The **Spawner-Recruitment (S-R) relationship** is the **standard Beverton-Holt** model, where the Steepness parameter (initial 0.6) is estimated using an **informative prior**. The **Recruitment variability (**$\sigma_R$) (0.75) is fixed in this configuration, and **recruitment deviations** are estimated from 1977 to 2020. **Catchability (**$Q$) for the three CPUE indices is estimated for each fishery. Finally, **selectivity** is based on **age**. The three commercial fleets primarily employ a **two-parameter age logistic selectivity** pattern but other selectivities were configured as a dome shape in other model variations, with parameters linked to temporal block patterns to allow for time-varying selectivity.
+
+------------------------------------------------------------------------
+
+```{r,echo=TRUE,warning=FALSE,include=FALSE}
+rm(list=ls()) 
+mydir = here::here()
+setwd(mydir)
+pacman::p_load(r4ss, rlang, ss3diags, ggplot2, xml2, kableExtra, rvest, knitr, dplyr, tidyr)
+source("SS3_helper_functions.R")
+
+## read outputs
+model_01_path <- file.path(paste(mydir, "model_01", sep = "/"))
+model_02_path <- file.path(paste(mydir, "model_02", sep = "/"))
+model_03_path <- file.path(paste(mydir, "model_03", sep = "/"))
+model_04_path <- file.path(paste(mydir, "model_04", sep = "/"))
+model_05_path <- file.path(paste(mydir, "model_05", sep = "/"))
+model_06_path <- file.path(paste(mydir, "model_06", sep = "/"))
+model_07_path <- file.path(paste(mydir, "model_07", sep = "/"))
+model_08_path <- file.path(paste(mydir, "model_08", sep = "/"))
+model_09_path <- file.path(paste(mydir, "model_09", sep = "/"))
+
+model_01_RA_path <- file.path(mydir, "model_01_RA")
+
+## for projections
+model_01_0Fmsy_path <- file.path(paste(mydir, "model_01_0Fmsy", sep = "/"))
+model_01_.75Fmsy_path <- file.path(paste(mydir, "model_01_.75Fmsy", sep = "/"))
+
+model_01 <- SS_output(model_01_path, forecast=T)
+model_02 <- SS_output(model_02_path, forecast=T)
+model_03 <- SS_output(model_03_path, forecast=T)
+model_04 <- SS_output(model_04_path, forecast=T)
+model_05 <- SS_output(model_05_path, forecast=T)
+model_06 <- SS_output(model_06_path, forecast=T)
+model_07 <- SS_output(model_07_path, forecast=T)
+model_08 <- SS_output(model_08_path, forecast=T)
+model_09 <- SS_output(model_09_path, forecast=T)
+
+## for projections
+model_01_0Fmsy <- SS_output(model_01_0Fmsy_path, forecast=T)
+model_01_.75Fmsy <- SS_output(model_01_.75Fmsy_path, forecast=T)
+
+## Retrospective Analyses
+retroModels <- SSgetoutput(dirvec = file.path( model_01_RA_path, "retrospectives", paste("retro", 0:-5, sep = "")))
+
+## read png
+outfile <- paste(mydir, "model_01", "plots", sep = "/")
+outfile_comparisons <- paste(mydir, "model_01", sep = "/")
+## read models 2.x
+
+## models paths 
+model_paths <- c(model_01_path,model_02_path, model_03_path, model_04_path,
+                 model_05_path, model_06_path, model_07_path, model_08_path,
+                 model_09_path)
+## models list 
+models <- list(
+  model_01 = model_01,
+  model_02 = model_02,
+  model_03 = model_03,
+  model_04 = model_04,
+  model_05 = model_05,
+  model_06 = model_06,
+  model_07 = model_07,
+  model_08 = model_08,
+  model_09 = model_09
+)
+
+```
+
+## Data {.tabset}
+
+### Raw Length Frenquency Data
+
+```{r, echo=FALSE, include=T, results='asis' }
+len_fish_art=paste0(mydir,"/Fish_art_frec_all.png")
+cat("![](", len_fish_art, ")\n")
+```
+
+```{r, echo=FALSE, include=T, results='asis' }
+len_fish_ind=paste0(mydir,"/Fish_ind_frec_all.png")
+cat("![](", len_fish_ind, ")\n")
+```
+
+### Data & years
+
+```{r, echo=FALSE, include=T }
+SSplotData(model_01, subplots=2) 
+```
+
+### Landings
+
+```{r, echo=FALSE, fig.cap= 'Landings'}
+SSplotCatch(model_01, subplots=2)
+```
+
+### Indices
+
+```{r, echo=FALSE, include=T }
+SSplotIndices(model_01, subplots=1, mainTitle=T)
+```
+
+### Length Comps PALANGRE
+
+```{r, echo=FALSE, include=T, results='asis' }
+age_fish=paste0(outfile,"/comp_lendat_flt1mkt0.png")
+cat("![](", age_fish, ")\n**FISHERY_Pal**")
+
+```
+
+### Length Comps TROTLINE
+
+```{r, echo=FALSE, include=T, results='asis' }
+age_fish=paste0(outfile,"/comp_lendat_flt2mkt0.png")
+cat("![](", age_fish, ")\n**FISHERY_TROTLINE**")
+```
+
+### Length Comps ARTISANAL
+
+```{r, echo=FALSE, include=T, results='asis' }
+age_fish=paste0(outfile,"/comp_lendat_flt3mkt0.png")
+cat("![](", age_fish, ")\n")
+```
+
+### Biology
+```{r, echo=FALSE, include=T, results='asis' }
+SSplotBiology(model_01,subplots=1)
+SSplotBiology(model_01,subplots=5)              
+SSplotBiology(model_01,subplots=6) 
+```
+
+
+# Model set up
+
+
+| Model | Selectivity | Priors on h | Linf |
+|------:|------------:|-------------:|-----:|
+| 1.0   | Logistic (time-varying) | N(0.4, 0.1) | Estimated |
+| 2.0   | Artisanal: Double Normal | N(0.4, 0.1) | Fixed |
+| 3.0   | Artisanal + Trotline: Double Normal | N(0.4, 0.1) | Fixed |
+| 4.0   | Same as 3.0 | N(0.4, 0.05) | Fixed |
+| 5.0   | Same as 1.0 | N(0.4, 0.1); Q^β: logNorm(log(0.75), 0.25) | Estimated |
+| 6.0   | Same as 2.0 | N(0.4, 0.05) | Fixed |
+| 7.0   | Same as 2.0 | N(0.4, 0.1); Q^β: logNorm(log(0.75), 0.25) | Fixed |
+| 8.0   | Pal + Trol: Logistic; Artisanal: Spline | N(0.4, 0.05) | Fixed |
+| 9.0   | Trot + Artisanal: Spline | N(0.4, 0.05) | Fixed |
+| | |
+
+
+## Model Fit (eg., model 01) {.tabset}
+
+### Indices (all models)
+
+```{r, echo=FALSE}
+# sspar(mfrow = c(2, 3))  # Set layout for 3 plots
+# SSplotIndices(model_01, subplots = 2, mainTitle = TRUE)
+# SSplotIndices(model_01, subplots = 3, mainTitle = TRUE)
+
+sspar(mfrow = c(2, 3))  # Adjust layout as needed
+
+for (model_name in names(models)) {
+  SSplotIndices(models[[model_name]], subplots = 2, mainTitle = T,legend = F)
+  SSplotIndices(models[[model_name]], subplots = 3, mainTitle = F )
+  cat(model_name)
+}
+```
+
+
+### Length Comps PALANGRE
+
+```{r, echo=FALSE, include=T, results='asis' }
+SSplotComps(model_01, subplots = 1,fleets = 1)
+```
+
+### Length Comps TROTLINE
+
+```{r, echo=FALSE, include=T, results='asis' }
+SSplotComps(model_01, subplots = 1,fleets = 2)
+```
+
+### Length Comps ARTISANAL
+
+```{r, echo=FALSE, include=T, results='asis' }
+SSplotComps(model_01, subplots = 1, fleets = 3)
+```
+
+### Mean Length
+
+```{r, echo=FALSE, include=T, results='asis' }
+SSplotComps(model_01, subplots = 9,fleets = 1)
+SSplotComps(model_01, subplots = 9,fleets = 2)
+SSplotComps(model_01, subplots = 9,fleets = 3)
+```
+
+
+## Diagnostics {.tabset}
+
+### Indices
+
+```{r, echo=FALSE, warning=FALSE, include=TRUE, message=FALSE}
+
+sspar(mfrow = c(1,3))
+# SSplotRunstest(model_01, add = TRUE, verbose=TRUE)
+# SSplotRunstest(model_02, add = TRUE, verbose=FALSE)
+
+for (model_name in names(models)) {
+  SSplotRunstest(models[[model_name]], add = TRUE, verbose=F)
+  cat(model_name)
+
+}
+
+```
+
+### Indices (Tables)
+
+```{r, echo=FALSE, warning=FALSE, include=TRUE, message=FALSE}
+
+runstest_all <- NULL
+
+for (model_name in names(models)) {
+  rti <- SSplotRunstest(models[[model_name]], add = FALSE, subplots = "cpue", verbose=F)
+  stats <- rti
+  stats$model <- model_name
+  # Combine results
+  runstest_all <- rbind(runstest_all, stats)
+}
+
+##runstest_all
+
+runstest_all %>%
+  mutate(across(where(is.numeric), round, digits = 3)) %>%
+  kable("html", caption = "Runs Test Summary Across Models") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "left"
+  ) %>%
+  row_spec(0, bold = TRUE, font_size = 12) %>%
+  row_spec(1:nrow(runstest_all), font_size = 12)
+
+```
+
+### Length Comps
+
+```{r, echo=FALSE, warning=FALSE, include=TRUE, message=FALSE}
+
+sspar(mfrow = c(1,3))
+# SSplotRunstest(model_01, add = TRUE, verbose=TRUE)
+
+for (model_name in names(models)) {
+  SSplotRunstest(models[[model_name]], subplots = "len", add = TRUE, ylim=c(-0.2,0.2), verbose=F)
+  cat(model_name)
+
+}
+
+```
+
+
+### Length Comps (Tables)
+
+
+```{r, echo=FALSE, warning=FALSE, include=TRUE, message=FALSE}
+
+runstest_all <- NULL  # Initialize empty data frame
+
+for (model_name in names(models)) {
+  rti <- SSplotRunstest(models[[model_name]], add = FALSE, subplots = "len", verbose=F)
+  stats <- rti
+  stats$model <- model_name
+  # Combine results
+  runstest_all <- rbind(runstest_all, stats)
+}
+
+##runstest_all
+
+runstest_all %>%
+  mutate(across(where(is.numeric), round, digits = 3)) %>%
+  kable("html", caption = "Runs Test Summary Across Models") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    position = "left"
+  ) %>%
+  row_spec(0, bold = TRUE, font_size = 12) %>%
+  row_spec(1:nrow(runstest_all), font_size = 12)
+
+```
+
+
+### Priors and MLE (example)
+
+```{r, echo=FALSE, include=T, results='asis' }
+Posteriors=paste0(outfile,"/parameter_distributions_page1.png")
+cat("![](", Posteriors, ")\n** **")
+```
+
+### Parameters Check (model_01)
+
+```{r, echo=FALSE, include=FALSE}
+# Read the HTML file
+html_content <- read_html(paste0(model_01_path,"/plots/parameterchecks.html"))
+# Extract table data
+table_data <- html_content %>%
+  html_node("table") %>%
+  html_table()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+# Adjust the number of decimals in your data frame
+table_data <- table_data %>%
+  mutate(across(where(is.numeric), round, digits = 3))
+# Render the table with smaller font size and fewer decimals
+table_data %>%
+  kable("html", caption = "Table of Parameters") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, font_size = 12) %>%
+  row_spec(1:nrow(table_data), font_size = 12)
+```
+
+
+### Likelihoods
+
+```{r, echo=FALSE, warning=FALSE, results='asis'}
+print(create_summary_table(model_paths))
+```
+
+### MSY RPs
+
+```{r, results='asis', echo=F}
+
+for (model_name in names(models)) {
+  MSY_RP <- getMSY_RP(models[[model_name]])
+  kable_table <- kable(MSY_RP, caption = paste("Summary Table", model_name, sep = " ")) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+  print(kable_table)
+}
+```
+
+
+### Retrospective analyses
+
+```{r, echo=FALSE, warning=FALSE, results='asis'}
+png_path=paste0(model_01_RA_path,"/compare4_Bratio_uncertainty.png")
+cat("![SBratio](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare2_spawnbio_uncertainty.png")
+cat("![SBratio](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare8_Fvalue_uncertainty.png")
+cat("![Fvalue](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare16_densities_SSB_Virgin.png")
+cat("![Fvalue](", png_path, ")")
+
+# png_path=paste0(model_01_RA_path,"/compare13_indices_flt4.png")
+# cat("![SURVEY](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare13_indices_flt4.png")
+cat("![FISHERY_](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare13_indices_flt5.png")
+cat("![FISHERY_](", png_path, ")")
+png_path=paste0(model_01_RA_path,"/compare13_indices_flt6.png")
+cat("![FISHERY_](", png_path, ")")
+```
+
+### Retrospective Analyses Table
+
+```{r, echo=FALSE, warning=FALSE, results='asis'}
+retroSummary <- SSsummarize(retroModels, verbose = FALSE)
+endyrvec <- retroSummary[["endyrs"]] + 0:-5
+
+rho_output <- SSmohnsrho(
+  summaryoutput = retroSummary,
+  endyrvec = endyrvec,
+  startyr = retroSummary[["endyrs"]] - 5,
+  verbose = FALSE
+)
+
+# Create a data frame from the list
+rho_df <- data.frame(
+  Metric = names(rho_output),
+  Value = unlist(rho_output)
+)
+rownames(rho_df) <- NULL
+
+kable(rho_df, format = "html", col.names = c("Metric", "Value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE)
+```
+
+
+## Model outputs {.tabset}
+
+### Time-Series
+
+```{r, echo=FALSE, include=T }
+
+for (model_name in names(models)) {
+  
+  par(mfrow = c(1, 2))
+    SSplotTimeseries(models[[model_name]],subplot=7)
+        SSplotTimeseries(models[[model_name]],subplot=9)
+  par(mfrow = c(1, 2))
+    SSplotTimeseries(models[[model_name]],subplot=11)
+        SSplotCatch(models[[model_name]],subplot=9)
+    cat(model_name)
+
+}
+```
+
+
+### R-S
+
+```{r, results='asis', echo=F}
+for (model_name in names(models)) {
+  
+    SSplotRecdevs(models[[model_name]], subplots = 2)
+        SSplotSpawnrecruit(models[[model_name]], subplots = 2)
+   cat(model_name)
+}
+```
+
+### Sel_PAL
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile,"/sel11_timevary_surf_flt1sex1.png")
+cat("![](", png_path, ")\n**FISHERY_PAL**")
+png_path=paste0(outfile,"/sel12_timevary_contour_flt1sex1.png")
+cat("![](", png_path, ")\n**FISHERY_PAL**")
+png_path=paste0(outfile,"/bio6_maturity.png")
+cat("![](", png_path, ")\n**Mat@age**")
+```
+
+### Sel_TRO
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile,"/sel11_timevary_surf_flt2sex1.png")
+cat("![](", png_path, ")\n**FISHERY_TRO**")
+png_path=paste0(outfile,"/sel12_timevary_contour_flt2sex1.png")
+cat("![](", png_path, ")\n**FISHERY_TRO**")
+png_path=paste0(outfile,"/bio6_maturity.png")
+cat("![](", png_path, ")\n**Mat@age**")
+```
+
+### Sel_ART
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile,"/sel11_timevary_surf_flt3sex1.png")
+cat("![](", png_path, ")\n**FISHERY_ART**")
+png_path=paste0(outfile,"/sel12_timevary_contour_flt3sex1.png")
+cat("![](", png_path, ")\n**FISHERY_ART**")
+png_path=paste0(outfile,"/bio6_maturity.png")
+cat("![](", png_path, ")\n**Mat@age**")
+```
+
+
+## Model Comparisons {.tabset}
+
+
+### CPUE_PAL
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare13_indices_flt4.png")
+cat("![](", png_path, ")\n")
+```
+
+### CPUE_TRO
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare13_indices_flt5.png")
+cat("![](", png_path, ")\n")
+```
+
+### CPUE_ART
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare13_indices_flt6.png")
+cat("![](", png_path, ")\n")
+```
+
+### SSB_Virgin
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare16_densities_SSB_Virgin.png")
+cat("![](", png_path, ")\n")
+```
+
+### F
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare8_Fvalue_uncertainty.png")
+cat("![](", png_path, ")\n")
+```
+
+### SSBratio_uncertainty
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare4_Bratio_uncertainty.png")
+cat("![](", png_path, ")\n")
+```
+
+### SSB_uncertainty
+
+```{r, results='asis', echo=F}
+png_path=paste0(outfile_comparisons,"/compare2_spawnbio_uncertainty.png")
+cat("![](", png_path, ")\n")
+```
+
+
+## Status {.tabset}
+
+### Kobe plots
+
+```{r Kope plots,  echo=F}
+kobeplotSS3(model_01, maintxt="model_01")
+kobeplotSS3(model_02, maintxt="model_02")
+kobeplotSS3(model_03, maintxt="model_03")
+kobeplotSS3(model_04, maintxt="model_04")
+kobeplotSS3(model_05, maintxt="model_05")
+kobeplotSS3(model_06, maintxt="model_06")
+kobeplotSS3(model_07, maintxt="model_07")
+kobeplotSS3(model_08, maintxt="model_08")
+kobeplotSS3(model_09, maintxt="model_09")
+```
+
+### Kobe Table
+
+```{r, results='asis', echo=F}
+KobeTs=getKobeTs(model_01)
+kable_table <- knitr::kable(KobeTs, caption = "Summary Table Model_01") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+kable_table
+
+```
+
+
+
+## Projections at Fmsy {.tabset}
+
+### plots (all models)
+
+```{r, results='asis', echo=F}
+
+# prob_results_models <- list( "model_01" = calculate_probSSB_catch(model_01))
+# 
+# plot_prSSBAboveBmsy_catch(
+#   results = prob_results_models,
+#   maintex = c("Model_01"),
+#   scenarios_to_plot = c("model_01")
+# )
+
+
+## Calculate probabilities for each model
+prob_results_models <- lapply(models, calculate_probSSB_catch)
+
+## Plot results
+plot_prSSBAboveBmsy_catch(
+  results = prob_results_models,
+  maintex = "all models",
+  scenarios_to_plot = names(prob_results_models)
+)
+
+
+```
+
+### Tables (all models)
+
+```{r, results='asis', echo=F}
+for (label in names(prob_results_models)) {
+  prob_results_df <- as.data.frame(prob_results_models[[label]])
+  row.names(prob_results_df) <- NULL
+  kable_table <- kable(prob_results_df, caption = paste("Summary Table", label, sep = " ")) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+  print(kable_table)
+}
+
+```
+
+
+
+### Proj Model_01 (xFMSY) 
+
+```{r, results='asis', echo=F}
+# Calculate probabilities
+prob_proj_results_models <- list(
+  "0xFmsy" = calculate_probSSB_catch(model_01_0Fmsy),
+  "0.75xFmsy" = calculate_probSSB_catch(model_01_.75Fmsy),
+  "1xFmsy" = calculate_probSSB_catch(model_01)
+)
+
+
+plot_prSSBAboveBmsy_catch(
+  results = prob_proj_results_models,
+  maintex = "Comparison",
+  scenarios_to_plot = c("0xFmsy","0.75xFmsy","1xFmsy")
+)
+
+
+```
+
+
+### Proj Model_01 (xFMSY) (Table)
+
+```{r, results='asis', echo=F}
+
+# Combine all scenarios into one long-format data frame
+combined_df <- bind_rows(
+  prob_proj_results_models$`0xFmsy` %>% mutate(Scenario = "0xFmsy"),
+  prob_proj_results_models$`0.75xFmsy` %>% mutate(Scenario = "0.75xFmsy"),
+  prob_proj_results_models$`1xFmsy` %>% mutate(Scenario = "1xFmsy")
+)
+
+# Function to create and print a wide table for a given metric
+print_metric_table <- function(metric_name) {
+  wide_table <- combined_df %>%
+    select(Year, Scenario, !!sym(metric_name)) %>%
+    pivot_wider(names_from = Scenario, values_from = !!sym(metric_name), names_prefix = paste0(metric_name, "_"))
+
+  kable(wide_table, caption = paste("Projection Table for", metric_name)) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+    print()
+}
+
+# Generate tables for selected metrics
+metrics <- c("SSB_prob", "Catch", "SSB", "SD")
+for (metric in metrics) {
+  print_metric_table(metric)
+}
+
+```
+
+
+
+
